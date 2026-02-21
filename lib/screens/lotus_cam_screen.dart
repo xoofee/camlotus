@@ -8,11 +8,10 @@ import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _kFocusPrefKey = 'lotus_cam_focus_distance';
+const String _kFocusPrefKey = 'lotus_cam_focus_diopters';
 const String _kShowKMatrixPrefKey = 'lotus_cam_show_k_matrix';
-const double _kFocusMin = 0.0; // near
-const double _kFocusMax = 1.0; // far
-const int _kFocusSteps = 100;
+const double _kFocusMinDiopters = 0.0; // infinity
+const double _kDefaultMaxDiopters = 10.0; // until we get LENS_INFO_MINIMUM_FOCUS_DISTANCE
 const String _kCameraChannel = 'com.example.camlotus/camera';
 
 class LotusCamScreen extends StatefulWidget {
@@ -27,7 +26,8 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   List<CameraDescription> _cameras = [];
   bool _isInitialized = false;
   String? _error;
-  double _focusValue = 0.5;  // [0, 1]
+  double _focusDiopters = 0.0; // diopters (0 = infinity)
+  double _focusMaxDiopters = _kDefaultMaxDiopters;
   final TextEditingController _focusTextController = TextEditingController();
   bool _showKMatrix = true;
   bool _isCapturing = false;
@@ -43,16 +43,15 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _focusValue = prefs.getDouble(_kFocusPrefKey) ?? 0.5;
+      _focusDiopters = prefs.getDouble(_kFocusPrefKey) ?? 0.0;
       _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? true;
     });
-    _focusTextController.text = _formatFocus(_focusValue);
+    _focusTextController.text = _formatDiopters(_focusDiopters);
   }
 
-  /// value: [0, 1]
-  Future<void> _saveFocus(double value) async {
+  Future<void> _saveFocusDiopters(double diopters) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_kFocusPrefKey, value);
+    await prefs.setDouble(_kFocusPrefKey, diopters);
   }
 
   /// value: true/false
@@ -61,16 +60,28 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     await prefs.setBool(_kShowKMatrixPrefKey, value);
   }
 
-  /// [0, 1] -> [0, 100] e.g. 0: 0, 0.2: 20, 1.0: 100
-  static String _formatFocus(double v) =>
-      (v * _kFocusSteps).round().toString();
+  static String _formatDiopters(double d) {
+    if (d == d.roundToDouble()) return d.round().toString();
+    return d.toStringAsFixed(2);
+  }
 
-  /// [0, 100] -> [0, 1] e.g. 0: 0, 20: 0.2, 100: 1.0
-  static double _parseFocus(String s) {
-    final n = int.tryParse(s);
-    if (n == null) return 0.5;
-    final v = n / _kFocusSteps;
-    return v.clamp(_kFocusMin, _kFocusMax);
+  static double _parseDiopters(String s, double maxD) {
+    final v = double.tryParse(s);
+    if (v == null) return 0.0;
+    return v.clamp(_kFocusMinDiopters, maxD);
+  }
+
+  /// Human-readable focus distance in metric for display only (from current diopters).
+  /// diopter 0 → "∞"; < 0.1 m → cm; >= 1 m → m.
+  String _formatFocusDistanceDisplay() {
+    if (_focusDiopters <= 0) return '∞';
+    final distanceM = 1.0 / _focusDiopters;
+    if (distanceM >= 1.0) {
+      return '${distanceM.toStringAsFixed(1)} m';
+    } else {
+      final distanceCm = distanceM * 100;
+      return '${distanceCm.toStringAsFixed(1)} cm';
+    }
   }
 
   Future<void> _initCamera() async {
@@ -112,14 +123,26 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
       await controller.initialize();
       _previewSize = controller.value.previewSize;
-      await _applyFocusDistance(_focusValue);
+
+      double maxD = _kDefaultMaxDiopters;
+      if (Platform.isAndroid) {
+        try {
+          final r = await const MethodChannel(_kCameraChannel)
+              .invokeMethod<double>('getMaxFocusDistanceDiopters');
+          if (r != null && r > 0) maxD = r;
+        } catch (_) {}
+      }
 
       if (!mounted) return;
       setState(() {
         _controller = controller;
         _error = null;
         _isInitialized = true;
+        _focusMaxDiopters = maxD;
+        _focusDiopters = _focusDiopters.clamp(_kFocusMinDiopters, maxD);
+        _focusTextController.text = _formatDiopters(_focusDiopters);
       });
+      await _applyFocusDistance(_focusDiopters);
     } catch (e, st) {
       debugPrint('LotusCam init error: $e\n$st');
       setState(() {
@@ -129,39 +152,35 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     }
   }
 
-  /// Sets focus distance (0 = near, 1 = far). Uses platform channel on Android;
-  /// standard Flutter camera plugin does not expose LENS_FOCUS_DISTANCE.
-  Future<void> _applyFocusDistance(double normalizedValue) async {
+  /// Sets focus distance in diopters (0 = infinity). Platform channel on Android.
+  Future<void> _applyFocusDistance(double diopters) async {
     if (!Platform.isAndroid) return;
     try {
       await const MethodChannel(_kCameraChannel).invokeMethod<void>(
         'setFocusDistance',
-        normalizedValue,
+        diopters,
       );
     } on MissingPluginException catch (_) {
-      // Native side not implemented yet (requires camera plugin support)
-    } on PlatformException catch (_) {
-      // ignore if not supported
-    }
+    } on PlatformException catch (_) {}
   }
 
-  void _onFocusSliderChanged(double value) {
+  void _onFocusSliderChanged(double diopters) {
     setState(() {
-      _focusValue = value;
-      _focusTextController.text = _formatFocus(value);
+      _focusDiopters = diopters;
+      _focusTextController.text = _formatDiopters(diopters);
     });
-    _saveFocus(value);
-    _applyFocusDistance(value);
+    _saveFocusDiopters(diopters);
+    _applyFocusDistance(diopters);
   }
 
   void _onFocusTextSubmitted(String text) {
-    final value = _parseFocus(text);  // [0, 100] -> [0, 1]
+    final diopters = _parseDiopters(text, _focusMaxDiopters);
     setState(() {
-      _focusValue = value;
-      _focusTextController.text = _formatFocus(value);
+      _focusDiopters = diopters;
+      _focusTextController.text = _formatDiopters(diopters);
     });
-    _saveFocus(value);
-    _applyFocusDistance(value);
+    _saveFocusDiopters(diopters);
+    _applyFocusDistance(diopters);
   }
 
   void _toggleKMatrix() {
@@ -355,22 +374,14 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
   Widget _buildFocusControls() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black54,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Text(
-            'Near',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(width: 8),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
@@ -379,27 +390,30 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
                 thumbColor: Colors.white,
               ),
               child: Slider(
-                value: _focusValue,
-                min: _kFocusMin,
-                max: _kFocusMax,
+                value: _focusDiopters,
+                min: _kFocusMinDiopters,
+                max: _focusMaxDiopters,
                 onChanged: _onFocusSliderChanged,
               ),
             ),
           ),
-          Text(
-            'Far',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 12,
+          SizedBox(
+            width: 48,
+            child: Text(
+              _formatFocusDistanceDisplay(),
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.9),
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 8),
           SizedBox(
-            width: 44,
+            width: 56,
             child: TextField(
               controller: _focusTextController,
               style: const TextStyle(color: Colors.white, fontSize: 14),
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
@@ -410,6 +424,11 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
                 fillColor: Colors.white12,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
+                ),
+                suffixText: ' D',
+                suffixStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 12,
                 ),
               ),
               onSubmitted: _onFocusTextSubmitted,

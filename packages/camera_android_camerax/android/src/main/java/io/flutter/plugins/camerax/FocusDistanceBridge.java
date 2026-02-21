@@ -22,50 +22,59 @@ import com.google.common.util.concurrent.ListenableFuture;
  * Holds the current Camera2CameraControl so that app code (e.g. MainActivity) can apply focus
  * distance (LENS_FOCUS_DISTANCE) without the camera plugin exposing this API. Set when the camera
  * is bound; clear when unbound.
- * 
- * Focus distance:
- * Desired distance to plane of sharpest focus, measured from frontmost surface of the lens.
- * 
- * Unit: diopters (1/meter)
- * see https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics#LENS_INFO_FOCUS_DISTANCE_CALIBRATION
+ *
+ * <p>Focus distance unit: diopters (1/meter). 0 = infinity; max = LENS_INFO_MINIMUM_FOCUS_DISTANCE.
  */
 @OptIn(markerClass = ExperimentalCamera2Interop.class)
 public final class FocusDistanceBridge {
-  private static final float MAX_DIOPTERS = 10f; // ~10 cm; device may clamp, 
+  /** Fallback when LENS_INFO_MINIMUM_FOCUS_DISTANCE is 0 (fixed-focus) or unavailable. */
+  private static final float FALLBACK_MAX_DIOPTERS = 10f;
 
   @Nullable private static Camera2CameraControl camera2CameraControl;
   @Nullable private static android.content.Context context;
+  private static float maxDiopters = FALLBACK_MAX_DIOPTERS;
 
-  /** Called by the plugin when a camera is bound. */
+  /**
+   * Called by the plugin when a camera is bound.
+   *
+   * @param maxDioptersValue LENS_INFO_MINIMUM_FOCUS_DISTANCE from the lens (max diopter for this device).
+   */
   public static void setCamera2CameraControl(
-      @Nullable Camera2CameraControl control, @Nullable android.content.Context ctx) {
+      @Nullable Camera2CameraControl control,
+      @Nullable android.content.Context ctx,
+      float maxDioptersValue) {
     camera2CameraControl = control;
     context = ctx;
+    maxDiopters = (maxDioptersValue > 0f) ? maxDioptersValue : FALLBACK_MAX_DIOPTERS;
   }
 
   /** Called by the plugin when the camera is unbound. */
   public static void clear() {
     camera2CameraControl = null;
     context = null;
+    maxDiopters = FALLBACK_MAX_DIOPTERS;
+  }
+
+  /** Returns the maximum focus distance in diopters (for this lens). */
+  public static float getMaxDiopters() {
+    return maxDiopters;
   }
 
   /**
-   * Applies focus distance. Called from app (e.g. MainActivity) when it receives setFocusDistance.
-   *
-   * @param normalized 0 = near (max diopters), 1 = far (0 diopters / infinity).
-   * see https://developer.android.com/reference/android/hardware/camera2/CaptureRequest#LENS_FOCUS_DISTANCE
+   * Applies focus distance in diopters. Called from app (e.g. MainActivity) when it receives
+   * setFocusDistance. Value is in diopters (0 = infinity, positive = nearer).
    */
-  public static void applyFocusDistance(double normalized) {
+  public static void applyFocusDistance(double diopters) {
     final Camera2CameraControl control = camera2CameraControl;
     final android.content.Context ctx = context;
     if (control == null || ctx == null) {
       return;
     }
-    float diopters = (float) ((1.0 - normalized) * MAX_DIOPTERS);
+    float d = (float) diopters;
     CaptureRequestOptions requestOptions =
         new CaptureRequestOptions.Builder()
             .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-            .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, diopters)
+            .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, d)
             .build();
     ListenableFuture<Void> future = control.addCaptureRequestOptions(requestOptions);
     Futures.addCallback(

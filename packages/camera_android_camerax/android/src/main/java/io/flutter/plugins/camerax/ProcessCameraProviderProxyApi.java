@@ -4,9 +4,13 @@
 
 package io.flutter.plugins.camerax;
 
+import android.content.Context;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import androidx.annotation.NonNull;
 import androidx.annotation.OptIn;
 import androidx.camera.camera2.interop.Camera2CameraControl;
+import androidx.camera.camera2.interop.Camera2CameraInfo;
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraInfo;
@@ -75,8 +79,21 @@ class ProcessCameraProviderProxyApi extends PigeonApiProcessCameraProvider {
               lifecycleOwner, cameraSelector, useCases.toArray(new UseCase[0]));
       Camera2CameraControl camera2Control =
           Camera2CameraControl.from(camera.getCameraControl());
+      float maxDiopters = 0f;
+      try {
+        CameraManager manager =
+            (CameraManager) getPigeonRegistrar().getContext().getSystemService(Context.CAMERA_SERVICE);
+        String cameraId = Camera2CameraInfo.from(camera.getCameraInfo()).getCameraId();
+        CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+        Float minFocus = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+        if (minFocus != null && minFocus > 0f) {
+          maxDiopters = minFocus;
+        }
+      } catch (Exception e) {
+        android.util.Log.w("ProcessCameraProvider", "LENS_INFO_MINIMUM_FOCUS_DISTANCE", e);
+      }
       FocusDistanceBridge.setCamera2CameraControl(
-          camera2Control, getPigeonRegistrar().getContext());
+          camera2Control, getPigeonRegistrar().getContext(), maxDiopters);
       return camera;
     }
 

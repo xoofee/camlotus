@@ -20,18 +20,21 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Camera: focus distance (0 = near, 1 = far). Uses FocusDistanceBridge from local
-        // packages/camera_android_camerax which sets LENS_FOCUS_DISTANCE when the camera is bound.
+        // Camera: focus distance in diopters. Uses FocusDistanceBridge from local
+        // packages/camera_android_camerax; value is diopters (0 = infinity, positive = nearer).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CAMERA_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setFocusDistance" -> {
-                    val normalized = (call.arguments as? Number)?.toDouble()
-                    if (normalized != null && normalized in 0.0..1.0) {
-                        FocusDistanceBridge.applyFocusDistance(normalized)
+                    val diopters = (call.arguments as? Number)?.toDouble()
+                    if (diopters != null && diopters >= 0) {
+                        FocusDistanceBridge.applyFocusDistance(diopters)
                         result.success(null)
                     } else {
-                        result.error("INVALID_ARGUMENT", "setFocusDistance requires a number in [0, 1]", null)
+                        result.error("INVALID_ARGUMENT", "setFocusDistance requires a non-negative diopter value", null)
                     }
+                }
+                "getMaxFocusDistanceDiopters" -> {
+                    result.success(FocusDistanceBridge.getMaxDiopters().toDouble())
                 }
                 else -> result.notImplemented()
             }

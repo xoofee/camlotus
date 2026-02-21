@@ -5,10 +5,10 @@ This is a clone of [camera_android_camerax](https://pub.dev/packages/camera_andr
 ## Changes from upstream
 
 1. **FocusDistanceBridge.java**  
-   Static bridge so app code (MainActivity) can set **LENS_FOCUS_DISTANCE** (focus range: near ↔ far) via Camera2 `CaptureRequestOptions`. The stock Flutter camera plugin does not expose this.
+   Static bridge so app code (MainActivity) can set **LENS_FOCUS_DISTANCE** in **diopters** (0 = infinity, positive = nearer). Uses **LENS_INFO_MINIMUM_FOCUS_DISTANCE** from the lens as the maximum diopter (closest focus). Exposes `applyFocusDistance(double diopters)` and `getMaxDiopters()`.
 
 2. **ProcessCameraProviderProxyApi.java**  
-   - In `bindToLifecycle`: after binding the camera, registers `Camera2CameraControl` with `FocusDistanceBridge` so the app can apply focus distance.
+   - In `bindToLifecycle`: reads `CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE` (max diopters for this lens), then registers `Camera2CameraControl` and that max with `FocusDistanceBridge`.
    - In `unbindAll`: calls `FocusDistanceBridge.clear()`.
 
 ## Updating from upstream
