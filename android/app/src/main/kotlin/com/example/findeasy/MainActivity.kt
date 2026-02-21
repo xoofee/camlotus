@@ -9,15 +9,34 @@ import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.camerax.FocusDistanceBridge
 import java.io.File
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.example.camlotus/install_source"
     private val INSTALL_CHANNEL = "com.example.camlotus/install_apk"
+    private val CAMERA_CHANNEL = "com.example.camlotus/camera"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
+
+        // Camera: focus distance (0 = near, 1 = far). Uses FocusDistanceBridge from local
+        // packages/camera_android_camerax which sets LENS_FOCUS_DISTANCE when the camera is bound.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CAMERA_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setFocusDistance" -> {
+                    val normalized = (call.arguments as? Number)?.toDouble()
+                    if (normalized != null && normalized in 0.0..1.0) {
+                        FocusDistanceBridge.applyFocusDistance(normalized)
+                        result.success(null)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "setFocusDistance requires a number in [0, 1]", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // Install source channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {

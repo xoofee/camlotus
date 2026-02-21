@@ -40,7 +40,7 @@ class HomePage extends StatelessWidget {
               delegate: SliverChildListDelegate([
                 _FeatureTile(
                   title: 'LotusCam',
-                  subtitle: 'Camera with focus control, K matrix overlay, capture to gallery',
+                  subtitle: 'Camera with focus distance (near–far), K matrix overlay, capture to gallery',
                   icon: Icons.camera_alt_rounded,
                   onTap: () {
                     Navigator.of(context).push(

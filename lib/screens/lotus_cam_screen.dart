@@ -3,15 +3,17 @@ import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String _kFocusPrefKey = 'lotus_cam_focus';
+const String _kFocusPrefKey = 'lotus_cam_focus_distance';
 const String _kShowKMatrixPrefKey = 'lotus_cam_show_k_matrix';
-const double _kFocusMin = 0.0;
-const double _kFocusMax = 1.0;
+const double _kFocusMin = 0.0; // near
+const double _kFocusMax = 1.0; // far
 const int _kFocusSteps = 100;
+const String _kCameraChannel = 'com.example.camlotus/camera';
 
 class LotusCamScreen extends StatefulWidget {
   const LotusCamScreen({super.key});
@@ -106,7 +108,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
       await controller.initialize();
       _previewSize = controller.value.previewSize;
-      await _applyFocusPoint(controller, _focusValue);
+      await _applyFocusDistance(_focusValue);
 
       if (!mounted) return;
       setState(() {
@@ -123,10 +125,18 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     }
   }
 
-  Future<void> _applyFocusPoint(CameraController c, double value) async {
+  /// Sets focus distance (0 = near, 1 = far). Uses platform channel on Android;
+  /// standard Flutter camera plugin does not expose LENS_FOCUS_DISTANCE.
+  Future<void> _applyFocusDistance(double normalizedValue) async {
+    if (!Platform.isAndroid) return;
     try {
-      await c.setFocusPoint(Offset(value, 0.5));
-    } catch (_) {
+      await const MethodChannel(_kCameraChannel).invokeMethod<void>(
+        'setFocusDistance',
+        normalizedValue,
+      );
+    } on MissingPluginException catch (_) {
+      // Native side not implemented yet (requires camera plugin support)
+    } on PlatformException catch (_) {
       // ignore if not supported
     }
   }
@@ -137,8 +147,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       _focusTextController.text = _formatFocus(value);
     });
     _saveFocus(value);
-    final c = _controller;
-    if (c != null) _applyFocusPoint(c, value);
+    _applyFocusDistance(value);
   }
 
   void _onFocusTextSubmitted(String text) {
@@ -148,8 +157,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       _focusTextController.text = _formatFocus(value);
     });
     _saveFocus(value);
-    final c = _controller;
-    if (c != null) _applyFocusPoint(c, value);
+    _applyFocusDistance(value);
   }
 
   void _toggleKMatrix() {
@@ -352,13 +360,13 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       child: Row(
         children: [
           Text(
-            'Focus',
+            'Near',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 14,
+              fontSize: 12,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
@@ -374,6 +382,14 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
               ),
             ),
           ),
+          Text(
+            'Far',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.9),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
           SizedBox(
             width: 44,
             child: TextField(

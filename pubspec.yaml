@@ -30,6 +30,11 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+# Use local clone of camera_android_camerax with FocusDistanceBridge for LENS_FOCUS_DISTANCE.
+dependency_overrides:
+  camera_android_camerax:
+    path: packages/camera_android_camerax
+
 flutter:
   uses-material-design: true
   generate: true
