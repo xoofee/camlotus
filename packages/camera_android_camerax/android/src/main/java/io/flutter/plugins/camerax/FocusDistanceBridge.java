@@ -22,10 +22,15 @@ import com.google.common.util.concurrent.ListenableFuture;
  * Holds the current Camera2CameraControl so that app code (e.g. MainActivity) can apply focus
  * distance (LENS_FOCUS_DISTANCE) without the camera plugin exposing this API. Set when the camera
  * is bound; clear when unbound.
+ * 
+ * Focus distance:
+ * Desired distance to plane of sharpest focus, measured from frontmost surface of the lens.
+ * 
+ * Unit: diopters (1/meter)
  */
 @OptIn(markerClass = ExperimentalCamera2Interop.class)
 public final class FocusDistanceBridge {
-  private static final float MAX_DIOPTERS = 10f; // ~10 cm; device may clamp
+  private static final float MAX_DIOPTERS = 10f; // ~10 cm; device may clamp, 
 
   @Nullable private static Camera2CameraControl camera2CameraControl;
   @Nullable private static android.content.Context context;
@@ -47,6 +52,7 @@ public final class FocusDistanceBridge {
    * Applies focus distance. Called from app (e.g. MainActivity) when it receives setFocusDistance.
    *
    * @param normalized 0 = near (max diopters), 1 = far (0 diopters / infinity).
+   * see https://developer.android.com/reference/android/hardware/camera2/CaptureRequest#LENS_FOCUS_DISTANCE
    */
   public static void applyFocusDistance(double normalized) {
     final Camera2CameraControl control = camera2CameraControl;

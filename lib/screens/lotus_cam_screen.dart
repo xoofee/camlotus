@@ -27,7 +27,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   List<CameraDescription> _cameras = [];
   bool _isInitialized = false;
   String? _error;
-  double _focusValue = 0.5;
+  double _focusValue = 0.5;  // [0, 1]
   final TextEditingController _focusTextController = TextEditingController();
   bool _showKMatrix = true;
   bool _isCapturing = false;
@@ -49,19 +49,23 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     _focusTextController.text = _formatFocus(_focusValue);
   }
 
+  /// value: [0, 1]
   Future<void> _saveFocus(double value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_kFocusPrefKey, value);
   }
 
+  /// value: true/false
   Future<void> _saveShowKMatrix(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kShowKMatrixPrefKey, value);
   }
 
+  /// [0, 1] -> [0, 100] e.g. 0: 0, 0.2: 20, 1.0: 100
   static String _formatFocus(double v) =>
       (v * _kFocusSteps).round().toString();
 
+  /// [0, 100] -> [0, 1] e.g. 0: 0, 20: 0.2, 100: 1.0
   static double _parseFocus(String s) {
     final n = int.tryParse(s);
     if (n == null) return 0.5;
@@ -151,7 +155,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   }
 
   void _onFocusTextSubmitted(String text) {
-    final value = _parseFocus(text);
+    final value = _parseFocus(text);  // [0, 100] -> [0, 1]
     setState(() {
       _focusValue = value;
       _focusTextController.text = _formatFocus(value);
