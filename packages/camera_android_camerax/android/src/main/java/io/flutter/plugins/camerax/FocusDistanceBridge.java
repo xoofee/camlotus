@@ -27,6 +27,7 @@ import com.google.common.util.concurrent.ListenableFuture;
  * Desired distance to plane of sharpest focus, measured from frontmost surface of the lens.
  * 
  * Unit: diopters (1/meter)
+ * see https://developer.android.com/reference/android/hardware/camera2/CameraCharacteristics#LENS_INFO_FOCUS_DISTANCE_CALIBRATION
  */
 @OptIn(markerClass = ExperimentalCamera2Interop.class)
 public final class FocusDistanceBridge {
