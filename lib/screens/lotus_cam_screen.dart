@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -86,6 +87,15 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
   Future<void> _initCamera() async {
     try {
+      // Camera plugin supports Android, iOS, and Web only (no Windows/macOS/Linux desktop).
+      if (!Platform.isAndroid && !Platform.isIOS && !kIsWeb) {
+        setState(() {
+          _error = 'Camera is not supported on this platform (desktop). Use Android or iOS.';
+          _isInitialized = false;
+        });
+        return;
+      }
+
       final status = await Permission.camera.request();
       if (!status.isGranted) {
         setState(() {
@@ -143,6 +153,12 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         _focusTextController.text = _formatDiopters(_focusDiopters);
       });
       await _applyFocusDistance(_focusDiopters);
+    } on MissingPluginException catch (e, st) {
+      debugPrint('LotusCam init error: $e\n$st');
+      setState(() {
+        _error = 'Camera is not supported on this platform. Use Android or iOS.';
+        _isInitialized = false;
+      });
     } catch (e, st) {
       debugPrint('LotusCam init error: $e\n$st');
       setState(() {
