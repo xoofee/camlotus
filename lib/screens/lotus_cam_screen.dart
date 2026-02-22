@@ -50,8 +50,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   void initState() {
     super.initState();
     _initRenderer();
-    _loadPrefs();
-    _initCamera();
+    _loadPrefs().then((_) => _initCamera());
   }
 
   Future<void> _initRenderer() async {
@@ -60,12 +59,18 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    String? lastPath = prefs.getString(_kLastPhotoPathKey);
+    if (lastPath != null && !File(lastPath).existsSync()) {
+      lastPath = null;
+      await _saveLastPhotoPath(null);
+    }
+    if (!mounted) return;
     setState(() {
       _focusDiopters = prefs.getDouble(_kFocusPrefKey) ?? 0.0;
       _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? true;
       _resolutionIndex = prefs.getInt(_kResolutionIndexKey) ?? 0;
       _resolutionIndex = _resolutionIndex.clamp(0, _kResolutions.length - 1);
-      _lastPhotoPath = prefs.getString(_kLastPhotoPathKey);
+      _lastPhotoPath = lastPath;
     });
     _focusTextController.text = _formatDiopters(_focusDiopters);
   }
