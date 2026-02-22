@@ -11,8 +11,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Resolution options: (width, height); first = highest = default.
+// Resolution options: (width, height); first = highest = default (match native camera max when possible).
 const List<(int, int)> _kResolutions = [
+  (4160, 3120), // common front/rear max (near pixelArraySize 4208x3120)
+  (3840, 2160),
+  (2560, 1920),
   (1920, 1080),
   (1280, 720),
   (640, 480),
@@ -21,7 +24,6 @@ const List<(int, int)> _kResolutions = [
 const String _kFocusPrefKey = 'lotus_cam_focus_diopters';
 const String _kShowKMatrixPrefKey = 'lotus_cam_show_k_matrix';
 const String _kResolutionIndexKey = 'lotus_cam_resolution_index';
-const String _kLastPhotoPathKey = 'lotus_cam_last_photo_path';
 const double _kFocusMinDiopters = 0.0;
 const double _kDefaultMaxDiopters = 10.0;
 
@@ -63,20 +65,45 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    String? lastPath = prefs.getString(_kLastPhotoPathKey);
-    if (lastPath != null && !File(lastPath).existsSync()) {
-      lastPath = null;
-      await _saveLastPhotoPath(null);
-    }
+    final newestPath = await _findNewestLotusImagePath();
     if (!mounted) return;
     setState(() {
       _focusDiopters = prefs.getDouble(_kFocusPrefKey) ?? 0.0;
       _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? false;
       _resolutionIndex = prefs.getInt(_kResolutionIndexKey) ?? 0;
       _resolutionIndex = _resolutionIndex.clamp(0, _kResolutions.length - 1);
-      _lastPhotoPath = lastPath;
+      _lastPhotoPath = newestPath;
     });
     _focusTextController.text = _formatDiopters(_focusDiopters);
+  }
+
+  /// Returns path of newest lotus_*.jpg in Camlotus dir by modification time, or null.
+  Future<String?> _findNewestLotusImagePath() async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final camlotusDir = Directory('${appDir.path}/Camlotus');
+    if (!await camlotusDir.exists()) return null;
+    final files = camlotusDir
+        .listSync()
+        .whereType<File>()
+        .where((f) {
+          final name = f.uri.pathSegments.last.toLowerCase();
+          return name.startsWith('lotus_') && name.endsWith('.jpg');
+        })
+        .toList();
+    if (files.isEmpty) return null;
+    files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+    return files.first.path;
+  }
+
+  static String _lotusFileNameFromNow() {
+    final now = DateTime.now();
+    final y = now.year;
+    final m = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
+    final h = now.hour.toString().padLeft(2, '0');
+    final min = now.minute.toString().padLeft(2, '0');
+    final s = now.second.toString().padLeft(2, '0');
+    return 'lotus_${y}$m${d}_$h$min$s.jpg';
   }
 
   Future<void> _saveFocusDiopters(double diopters) async {
@@ -92,15 +119,6 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   Future<void> _saveResolutionIndex(int index) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kResolutionIndexKey, index);
-  }
-
-  Future<void> _saveLastPhotoPath(String? path) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (path != null) {
-      await prefs.setString(_kLastPhotoPathKey, path);
-    } else {
-      await prefs.remove(_kLastPhotoPathKey);
-    }
   }
 
   static String _formatDiopters(double d) {
@@ -335,12 +353,11 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       final appDir = await getApplicationDocumentsDirectory();
       final camlotusDir = Directory('${appDir.path}/Camlotus');
       if (!await camlotusDir.exists()) await camlotusDir.create(recursive: true);
-      const lastCaptureName = 'last_capture.jpg';
-      final path = '${camlotusDir.path}/$lastCaptureName';
+      final fileName = _lotusFileNameFromNow();
+      final path = '${camlotusDir.path}/$fileName';
       final file = File(path);
       await file.writeAsBytes(bytes);
       await Gal.putImage(path, album: 'Camlotus');
-      await _saveLastPhotoPath(path);
       if (mounted) {
         setState(() {
           _lastPhotoPath = path;
