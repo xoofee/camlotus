@@ -652,6 +652,11 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         cameraUtils.getMaxFocusDistanceDiopters(trackId, result);
         break;
       }
+      case "mediaStreamTrackGetCameraIntrinsics": {
+        String trackId = call.argument("trackId");
+        cameraUtils.getCameraIntrinsics(trackId, result);
+        break;
+      }
       case "mediaStreamTrackSetFocusMode": {
         cameraUtils.setFocusMode(call, result);
         break;

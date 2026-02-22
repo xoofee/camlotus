@@ -89,6 +89,11 @@ class Helper {
           MediaStreamTrack videoTrack) =>
       CameraUtils.getMaxFocusDistanceDiopters(videoTrack);
 
+  /// Camera intrinsic calibration [fx, fy, cx, cy, ...] (Android). Null if unsupported.
+  static Future<List<double>?> getCameraIntrinsics(
+          MediaStreamTrack videoTrack) =>
+      CameraUtils.getCameraIntrinsics(videoTrack);
+
   static Future<void> setExposureMode(
           MediaStreamTrack videoTrack, CameraExposureMode exposureMode) =>
       CameraUtils.setExposureMode(videoTrack, exposureMode);

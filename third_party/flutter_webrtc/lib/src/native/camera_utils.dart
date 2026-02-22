@@ -48,6 +48,23 @@ class CameraUtils {
     return 0.0;
   }
 
+  /// Returns camera intrinsic calibration [fx, fy, cx, cy, ...] (Android).
+  /// Null if not supported (e.g. LENS_INTRINSIC_CALIBRATION unavailable).
+  static Future<List<double>?> getCameraIntrinsics(
+      MediaStreamTrack videoTrack) async {
+    if (WebRTC.platformIsAndroid) {
+      final result = await WebRTC.invokeMethod(
+        'mediaStreamTrackGetCameraIntrinsics',
+        <String, dynamic>{'trackId': videoTrack.id},
+      );
+      if (result == null) return null;
+      final list = result as List<dynamic>?;
+      if (list == null || list.length < 4) return null;
+      return list.map((e) => (e as num).toDouble()).toList();
+    }
+    return null;
+  }
+
   /// Set the exposure point for the camera, focusMode can be:
   /// 'auto', 'locked'
   static Future<void> setFocusMode(

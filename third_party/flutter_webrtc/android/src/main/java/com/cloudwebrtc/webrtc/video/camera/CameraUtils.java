@@ -29,6 +29,8 @@ import org.webrtc.Camera2Capturer;
 import org.webrtc.CameraEnumerationAndroid;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import io.flutter.embedding.engine.systemchannels.PlatformChannel;
@@ -545,6 +547,83 @@ public class CameraUtils {
     }
 
     result.success(0.0);
+  }
+
+  /**
+   * Returns camera intrinsic calibration from LENS_INTRINSIC_CALIBRATION (Android API 21+).
+   * Format is typically [fx, fy, cx, cy] or 5 elements. Returns null if not supported.
+   */
+  @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+  public void getCameraIntrinsics(String trackId, MethodChannel.Result result) {
+    VideoCapturerInfo info = getUserMediaImpl.getCapturerInfo(trackId);
+    if (info == null) {
+      result.success(null);
+      return;
+    }
+
+    if (info.capturer instanceof Camera2Capturer) {
+      CameraManager manager;
+      CameraDevice cameraDevice;
+
+      try {
+        Object session =
+                getPrivateProperty(
+                        Camera2Capturer.class.getSuperclass(), info.capturer, "currentSession");
+        manager =
+                (CameraManager)
+                        getPrivateProperty(Camera2Capturer.class, info.capturer, "cameraManager");
+        cameraDevice =
+                (CameraDevice) getPrivateProperty(session.getClass(), session, "cameraDevice");
+      } catch (NoSuchFieldWithNameException e) {
+        result.success(null);
+        return;
+      }
+
+      try {
+        CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
+        printCameraCharacteristics(cameraDevice.getId(), characteristics);
+
+        float[] intrinsics = characteristics.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION);
+        if (intrinsics == null || intrinsics.length < 4) {
+          result.success(null);
+          return;
+        }
+        List<Double> list = new ArrayList<>(intrinsics.length);
+        for (float v : intrinsics) {
+          list.add((double) v);
+        }
+        result.success(list);
+      } catch (CameraAccessException e) {
+        result.success(null);
+      }
+      return;
+    }
+
+    result.success(null);
+  }
+
+  /** Logs all camera characteristics to logcat (debug console). */
+  private static void printCameraCharacteristics(String cameraId, CameraCharacteristics c) {
+    Log.d(TAG, "========== CameraCharacteristics camera=" + cameraId + " ==========");
+    try {
+      for (CameraCharacteristics.Key<?> key : c.getKeys()) {
+        Object value = c.get(key);
+        Log.d(TAG, "  " + key + " = " + valueToString(value));
+      }
+    } catch (Exception e) {
+      Log.d(TAG, "printCameraCharacteristics error: " + e.getMessage());
+    }
+    Log.d(TAG, "========== end CameraCharacteristics ==========");
+  }
+
+  private static String valueToString(Object value) {
+    if (value == null) return "null";
+    if (value instanceof float[]) return Arrays.toString((float[]) value);
+    if (value instanceof int[]) return Arrays.toString((int[]) value);
+    if (value instanceof byte[]) return Arrays.toString((byte[]) value);
+    if (value instanceof long[]) return Arrays.toString((long[]) value);
+    if (value instanceof Object[]) return Arrays.deepToString((Object[]) value);
+    return value.toString();
   }
 
   @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
