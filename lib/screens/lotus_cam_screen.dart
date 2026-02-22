@@ -35,7 +35,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   bool _isInitialized = false;
   String? _error;
   double _focusDiopters = 0.0;
-  final double _focusMaxDiopters = _kDefaultMaxDiopters;
+  double _focusMaxDiopters = _kDefaultMaxDiopters;
   final TextEditingController _focusTextController = TextEditingController();
   bool _showKMatrix = true;
   bool _isCapturing = false;
@@ -180,12 +180,25 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       }
 
       if (!mounted) return;
+      double maxD = _focusMaxDiopters;
+      if (Platform.isAndroid && _localStream != null) {
+        try {
+          final track = _localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video');
+          maxD = await Helper.getMaxFocusDistanceDiopters(track);
+          if (maxD <= 0) maxD = _kDefaultMaxDiopters;
+        } catch (_) {}
+      }
+      final maxDiopters = maxD;
       setState(() {
         _error = null;
         _isInitialized = true;
+        _focusMaxDiopters = maxDiopters;
         _focusDiopters = _focusDiopters.clamp(_kFocusMinDiopters, _focusMaxDiopters);
         _focusTextController.text = _formatDiopters(_focusDiopters);
       });
+      if (Platform.isAndroid && _localStream != null) {
+        _applyFocusDistance(_focusDiopters);
+      }
     } catch (e, st) {
       debugPrint('LotusCam init error: $e\n$st');
       setState(() {
@@ -214,7 +227,16 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       final h = settings['height'] as num? ?? _kResolutions[_resolutionIndex].$2;
       _previewSize = Size(w.toDouble(), h.toDouble());
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      if (Platform.isAndroid && _localStream != null) {
+        _applyFocusDistance(_focusDiopters);
+        Helper.getMaxFocusDistanceDiopters(_localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video'))
+            .then((double maxD) {
+          if (maxD > 0 && mounted) setState(() => _focusMaxDiopters = maxD);
+        });
+      }
+    }
   }
 
   void _onSwitchCamera() {
@@ -233,12 +255,23 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     _replaceStream();
   }
 
+  Future<void> _applyFocusDistance(double diopters) async {
+    if (!Platform.isAndroid || _localStream == null) return;
+    try {
+      final track = _localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video');
+      await Helper.setFocusDistance(track, diopters);
+    } catch (e) {
+      debugPrint('setFocusDistance: $e');
+    }
+  }
+
   void _onFocusSliderChanged(double diopters) {
     setState(() {
       _focusDiopters = diopters;
       _focusTextController.text = _formatDiopters(diopters);
     });
     _saveFocusDiopters(diopters);
+    _applyFocusDistance(diopters);
   }
 
   void _onFocusTextSubmitted(String text) {
@@ -248,6 +281,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       _focusTextController.text = _formatDiopters(diopters);
     });
     _saveFocusDiopters(diopters);
+    _applyFocusDistance(diopters);
   }
 
   void _toggleKMatrix() {
