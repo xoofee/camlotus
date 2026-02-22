@@ -1,19 +1,26 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/services.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Resolution options: (width, height); first = highest = default.
+const List<(int, int)> _kResolutions = [
+  (1920, 1080),
+  (1280, 720),
+  (640, 480),
+];
+
 const String _kFocusPrefKey = 'lotus_cam_focus_diopters';
 const String _kShowKMatrixPrefKey = 'lotus_cam_show_k_matrix';
-const double _kFocusMinDiopters = 0.0; // infinity
-const double _kDefaultMaxDiopters = 10.0; // until we get LENS_INFO_MINIMUM_FOCUS_DISTANCE
-const String _kCameraChannel = 'com.example.camlotus/camera';
+const String _kResolutionIndexKey = 'lotus_cam_resolution_index';
+const String _kLastPhotoPathKey = 'lotus_cam_last_photo_path';
+const double _kFocusMinDiopters = 0.0;
+const double _kDefaultMaxDiopters = 10.0;
 
 class LotusCamScreen extends StatefulWidget {
   const LotusCamScreen({super.key});
@@ -23,22 +30,32 @@ class LotusCamScreen extends StatefulWidget {
 }
 
 class _LotusCamScreenState extends State<LotusCamScreen> {
-  CameraController? _controller;
-  List<CameraDescription> _cameras = [];
+  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  MediaStream? _localStream;
   bool _isInitialized = false;
   String? _error;
-  double _focusDiopters = 0.0; // diopters (0 = infinity)
-  double _focusMaxDiopters = _kDefaultMaxDiopters;
+  double _focusDiopters = 0.0;
+  final double _focusMaxDiopters = _kDefaultMaxDiopters;
   final TextEditingController _focusTextController = TextEditingController();
   bool _showKMatrix = true;
   bool _isCapturing = false;
-  Size? _previewSize;
+  bool _showCaptureBlink = false;
+  Size _previewSize = const Size(1920, 1080);
+  List<MediaDeviceInfo> _videoDevices = [];
+  int _currentDeviceIndex = 0;
+  int _resolutionIndex = 0;
+  String? _lastPhotoPath;
 
   @override
   void initState() {
     super.initState();
+    _initRenderer();
     _loadPrefs();
     _initCamera();
+  }
+
+  Future<void> _initRenderer() async {
+    await _localRenderer.initialize();
   }
 
   Future<void> _loadPrefs() async {
@@ -46,6 +63,9 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     setState(() {
       _focusDiopters = prefs.getDouble(_kFocusPrefKey) ?? 0.0;
       _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? true;
+      _resolutionIndex = prefs.getInt(_kResolutionIndexKey) ?? 0;
+      _resolutionIndex = _resolutionIndex.clamp(0, _kResolutions.length - 1);
+      _lastPhotoPath = prefs.getString(_kLastPhotoPathKey);
     });
     _focusTextController.text = _formatDiopters(_focusDiopters);
   }
@@ -55,10 +75,23 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     await prefs.setDouble(_kFocusPrefKey, diopters);
   }
 
-  /// value: true/false
   Future<void> _saveShowKMatrix(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kShowKMatrixPrefKey, value);
+  }
+
+  Future<void> _saveResolutionIndex(int index) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kResolutionIndexKey, index);
+  }
+
+  Future<void> _saveLastPhotoPath(String? path) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (path != null) {
+      await prefs.setString(_kLastPhotoPathKey, path);
+    } else {
+      await prefs.remove(_kLastPhotoPathKey);
+    }
   }
 
   static String _formatDiopters(double d) {
@@ -72,30 +105,37 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return v.clamp(_kFocusMinDiopters, maxD);
   }
 
-  /// Human-readable focus distance in metric for display only (from current diopters).
-  /// diopter 0 → "∞"; < 0.1 m → cm; >= 1 m → m.
   String _formatFocusDistanceDisplay() {
     if (_focusDiopters <= 0) return '∞';
     final distanceM = 1.0 / _focusDiopters;
     if (distanceM >= 1.0) {
       return '${distanceM.toStringAsFixed(1)} m';
-    } else {
-      final distanceCm = distanceM * 100;
-      return '${distanceCm.toStringAsFixed(1)} cm';
     }
+    final distanceCm = distanceM * 100;
+    return '${distanceCm.toStringAsFixed(1)} cm';
+  }
+
+  Map<String, dynamic> _mediaConstraints() {
+    final (w, h) = _kResolutions[_resolutionIndex];
+    return {
+      'audio': false,
+      'video': {
+        'mandatory': {
+          'minWidth': w.toString(),
+          'minHeight': h.toString(),
+          'minFrameRate': '24',
+        },
+        'optional': [
+          {'deviceId': _videoDevices.isNotEmpty && _currentDeviceIndex < _videoDevices.length
+              ? _videoDevices[_currentDeviceIndex].deviceId
+              : null},
+        ],
+      },
+    };
   }
 
   Future<void> _initCamera() async {
     try {
-      // Camera plugin supports Android, iOS, and Web only (no Windows/macOS/Linux desktop).
-      if (!Platform.isAndroid && !Platform.isIOS && !kIsWeb) {
-        setState(() {
-          _error = 'Camera is not supported on this platform (desktop). Use Android or iOS.';
-          _isInitialized = false;
-        });
-        return;
-      }
-
       final status = await Permission.camera.request();
       if (!status.isGranted) {
         setState(() {
@@ -104,60 +144,42 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         });
         return;
       }
-      if (Platform.isIOS || Platform.isAndroid) {
+      if (Platform.isAndroid || Platform.isIOS) {
         final ph = await Permission.photos.request();
-        if (!ph.isGranted && !ph.isLimited) {
-          // Continue anyway; saving may fail with a message
-        }
+        if (!ph.isGranted && !ph.isLimited) {}
       }
 
-      _cameras = await availableCameras();
-      if (_cameras.isEmpty) {
-        setState(() {
-          _error = 'No camera found';
-          _isInitialized = false;
-        });
-        return;
+      _videoDevices = await navigator.mediaDevices.enumerateDevices();
+      final videoOnly = _videoDevices.where((d) => d.kind == 'videoinput' || d.kind == 'video').toList();
+      if (videoOnly.isEmpty) {
+        _videoDevices = [];
+      } else {
+        _videoDevices = videoOnly;
       }
 
-      final camera = _cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => _cameras.first,
-      );
-
-      final controller = CameraController(
-        camera,
-        ResolutionPreset.high,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
-
-      await controller.initialize();
-      _previewSize = controller.value.previewSize;
-
-      double maxD = _kDefaultMaxDiopters;
-      if (Platform.isAndroid) {
-        try {
-          final r = await const MethodChannel(_kCameraChannel)
-              .invokeMethod<double>('getMaxFocusDistanceDiopters');
-          if (r != null && r > 0) maxD = r;
-        } catch (_) {}
+      final constraints = _mediaConstraints();
+      if (_videoDevices.isNotEmpty && _currentDeviceIndex < _videoDevices.length) {
+        constraints['video']!['optional'] = [
+          {'sourceId': _videoDevices[_currentDeviceIndex].deviceId},
+        ];
+      }
+      var stream = await navigator.mediaDevices.getUserMedia(constraints);
+      _localStream = stream;
+      _localRenderer.srcObject = _localStream;
+      final tracks = _localStream!.getVideoTracks();
+      if (tracks.isNotEmpty) {
+        final settings = tracks.first.getSettings();
+        final w = settings['width'] as num? ?? _kResolutions[_resolutionIndex].$1;
+        final h = settings['height'] as num? ?? _kResolutions[_resolutionIndex].$2;
+        _previewSize = Size(w.toDouble(), h.toDouble());
       }
 
       if (!mounted) return;
       setState(() {
-        _controller = controller;
         _error = null;
         _isInitialized = true;
-        _focusMaxDiopters = maxD;
-        _focusDiopters = _focusDiopters.clamp(_kFocusMinDiopters, maxD);
+        _focusDiopters = _focusDiopters.clamp(_kFocusMinDiopters, _focusMaxDiopters);
         _focusTextController.text = _formatDiopters(_focusDiopters);
-      });
-      await _applyFocusDistance(_focusDiopters);
-    } on MissingPluginException catch (e, st) {
-      debugPrint('LotusCam init error: $e\n$st');
-      setState(() {
-        _error = 'Camera is not supported on this platform. Use Android or iOS.';
-        _isInitialized = false;
       });
     } catch (e, st) {
       debugPrint('LotusCam init error: $e\n$st');
@@ -168,16 +190,42 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     }
   }
 
-  /// Sets focus distance in diopters (0 = infinity). Platform channel on Android.
-  Future<void> _applyFocusDistance(double diopters) async {
-    if (!Platform.isAndroid) return;
-    try {
-      await const MethodChannel(_kCameraChannel).invokeMethod<void>(
-        'setFocusDistance',
-        diopters,
-      );
-    } on MissingPluginException catch (_) {
-    } on PlatformException catch (_) {}
+  Future<void> _replaceStream() async {
+    await _localStream?.dispose();
+    _localStream = null;
+    final constraints = _mediaConstraints();
+    if (_videoDevices.isNotEmpty && _currentDeviceIndex < _videoDevices.length) {
+      constraints['video']!['optional'] = [
+        {'sourceId': _videoDevices[_currentDeviceIndex].deviceId},
+      ];
+    }
+    final stream = await navigator.mediaDevices.getUserMedia(constraints);
+    _localStream = stream;
+    _localRenderer.srcObject = _localStream;
+    final tracks = _localStream!.getVideoTracks();
+    if (tracks.isNotEmpty) {
+      final settings = tracks.first.getSettings();
+      final w = settings['width'] as num? ?? _kResolutions[_resolutionIndex].$1;
+      final h = settings['height'] as num? ?? _kResolutions[_resolutionIndex].$2;
+      _previewSize = Size(w.toDouble(), h.toDouble());
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onSwitchCamera() {
+    if (_videoDevices.isEmpty) return;
+    setState(() {
+      _currentDeviceIndex = (_currentDeviceIndex + 1) % _videoDevices.length;
+    });
+    _replaceStream();
+  }
+
+  void _onResolutionTap() {
+    setState(() {
+      _resolutionIndex = (_resolutionIndex + 1) % _kResolutions.length;
+    });
+    _saveResolutionIndex(_resolutionIndex);
+    _replaceStream();
   }
 
   void _onFocusSliderChanged(double diopters) {
@@ -186,7 +234,6 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       _focusTextController.text = _formatDiopters(diopters);
     });
     _saveFocusDiopters(diopters);
-    _applyFocusDistance(diopters);
   }
 
   void _onFocusTextSubmitted(String text) {
@@ -196,7 +243,6 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       _focusTextController.text = _formatDiopters(diopters);
     });
     _saveFocusDiopters(diopters);
-    _applyFocusDistance(diopters);
   }
 
   void _toggleKMatrix() {
@@ -205,30 +251,47 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   }
 
   Future<void> _captureAndSave() async {
-    final c = _controller;
-    if (c == null || !c.value.isInitialized || _isCapturing) return;
+    if (_localStream == null || _isCapturing) return;
     setState(() => _isCapturing = true);
     try {
-      final file = await c.takePicture();
-      await Gal.putImage(file.path, album: 'Camlotus');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo saved to gallery')),
-      );
+      final videoTrack = _localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video');
+      final frame = await videoTrack.captureFrame();
+      final bytes = frame.asUint8List();
+      if (bytes.isEmpty) return;
+      final appDir = await getApplicationDocumentsDirectory();
+      final camlotusDir = Directory('${appDir.path}/Camlotus');
+      if (!await camlotusDir.exists()) await camlotusDir.create(recursive: true);
+      const lastCaptureName = 'last_capture.jpg';
+      final path = '${camlotusDir.path}/$lastCaptureName';
+      final file = File(path);
+      await file.writeAsBytes(bytes);
+      await Gal.putImage(path, album: 'Camlotus');
+      await _saveLastPhotoPath(path);
+      if (mounted) {
+        setState(() {
+          _lastPhotoPath = path;
+          _showCaptureBlink = true;
+        });
+        Future.delayed(const Duration(milliseconds: 120), () {
+          if (mounted) setState(() => _showCaptureBlink = false);
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
+      debugPrint('Capture error: $e');
     } finally {
       if (mounted) setState(() => _isCapturing = false);
     }
   }
 
+  void _openGallery() {
+    Gal.open();
+  }
+
   @override
   void dispose() {
     _focusTextController.dispose();
-    _controller?.dispose();
+    _localStream?.dispose();
+    _localRenderer.dispose();
     super.dispose();
   }
 
@@ -237,7 +300,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('LotusCam'),
+        // title: const Text('LotusCam'),
         backgroundColor: Colors.black87,
         foregroundColor: Colors.white,
         actions: [
@@ -250,20 +313,14 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
                   onTap: _toggleKMatrix,
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: _showKMatrix
-                          ? Colors.white24
-                          : Colors.white.withValues(alpha: 0.1),
+                      color: _showKMatrix ? Colors.white24 : Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       'K ${_showKMatrix ? 'ON' : 'OFF'}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white70,
-                      ),
+                      style: const TextStyle(fontSize: 12, color: Colors.white70),
                     ),
                   ),
                 ),
@@ -286,11 +343,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
             children: [
               Icon(Icons.error_outline_rounded, size: 48, color: Colors.red[300]),
               const SizedBox(height: 16),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70),
-              ),
+              Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: () {
@@ -305,10 +358,8 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       );
     }
 
-    if (!_isInitialized || _controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      );
+    if (!_isInitialized || _localStream == null) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
     }
 
     return Stack(
@@ -317,11 +368,33 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         InteractiveViewer(
           minScale: 1.0,
           maxScale: 10.0,
-          child: Center(
-            child: CameraPreview(_controller!),
+          child: Center(child: RTCVideoView(_localRenderer)),
+        ),
+        if (_showCaptureBlink)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(color: Colors.white.withValues(alpha: 0.4)),
+            ),
+          ),
+        if (_showKMatrix) _buildKMatrixOverlay(),
+        Positioned(
+          left: 12,
+          bottom: MediaQuery.of(context).padding.bottom + 24 + 72 + 16 + 60,
+          child: GestureDetector(
+            onTap: _onResolutionTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${_kResolutions[_resolutionIndex].$1}×${_kResolutions[_resolutionIndex].$2}',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
           ),
         ),
-        if (_showKMatrix) _buildKMatrixOverlay(),
         Positioned(
           left: 0,
           right: 0,
@@ -332,7 +405,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
               children: [
                 _buildFocusControls(),
                 const SizedBox(height: 16),
-                _buildCaptureButton(),
+                _buildBottomControls(),
                 const SizedBox(height: 24),
               ],
             ),
@@ -343,8 +416,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   }
 
   Widget _buildKMatrixOverlay() {
-    final size = _previewSize ?? const Size(1920, 1080);
-    final k = _computeKMatrix(size);
+    final k = _computeKMatrix(_previewSize);
     return Positioned(
       left: 12,
       top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
@@ -359,21 +431,13 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
             children: [
               Text(
                 'K (approx)',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.9),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 11, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Text(
                 'fx=${k.fx.toStringAsFixed(1)} fy=${k.fy.toStringAsFixed(1)}\n'
                 'cx=${k.cx.toStringAsFixed(1)} cy=${k.cy.toStringAsFixed(1)}',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                ),
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10, fontFamily: 'monospace'),
               ),
             ],
           ),
@@ -396,10 +460,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
           Expanded(
@@ -421,10 +482,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
             width: 48,
             child: Text(
               _formatFocusDistanceDisplay(),
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.9),
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -436,25 +494,54 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 6,
-                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 filled: true,
                 fillColor: Colors.white12,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 suffixText: ' D',
-                suffixStyle: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 12,
-                ),
+                suffixStyle: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
               ),
               onSubmitted: _onFocusTextSubmitted,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBottomControls() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(width: 24),
+        _buildGalleryButton(),
+        const SizedBox(width: 24),
+        _buildCaptureButton(),
+        const SizedBox(width: 24),
+        _buildSwitchCameraButton(),
+        const SizedBox(width: 24),
+      ],
+    );
+  }
+
+  Widget _buildGalleryButton() {
+    return GestureDetector(
+      onTap: _openGallery,
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: _lastPhotoPath != null && File(_lastPhotoPath!).existsSync()
+              ? Image.file(File(_lastPhotoPath!), fit: BoxFit.cover)
+              : Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.photo_library_outlined, color: Colors.white54, size: 32),
+                ),
+        ),
       ),
     );
   }
@@ -476,13 +563,20 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
           child: _isCapturing
               ? const Padding(
                   padding: EdgeInsets.all(20),
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2,
-                  ),
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                 )
               : const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 36),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchCameraButton() {
+    return IconButton(
+      onPressed: _videoDevices.length > 1 ? _onSwitchCamera : null,
+      icon: const Icon(Icons.cameraswitch_rounded, color: Colors.white, size: 28),
+      style: IconButton.styleFrom(
+        backgroundColor: _videoDevices.length > 1 ? Colors.white24 : Colors.white12,
       ),
     );
   }

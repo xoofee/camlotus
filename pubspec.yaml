@@ -19,21 +19,17 @@ dependencies:
   # Image processing and edge detection
   image: ^4.3.0
 
-  # Camera, persistence, gallery, permissions
-  camera: ^0.11.0+2
+  # Camera (flutter_webrtc for all platforms), persistence, gallery, permissions
+  flutter_webrtc: ^0.12.0
   shared_preferences: ^2.3.3
   gal: ^2.3.0
   permission_handler: ^11.3.1
+  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-
-# Use local clone of camera_android_camerax with FocusDistanceBridge for LENS_FOCUS_DISTANCE.
-dependency_overrides:
-  camera_android_camerax:
-    path: packages/camera_android_camerax
 
 flutter:
   uses-material-design: true
