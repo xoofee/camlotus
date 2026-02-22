@@ -22,32 +22,78 @@ class CameraInfoScreen extends StatelessWidget {
       ),
       body: entries.isEmpty
           ? const Center(child: Text('No characteristics available'))
-          : SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SingleChildScrollView(
-                child: DataTable(
-                  columnSpacing: 24,
-                  columns: const [
-                    DataColumn(label: Text('Key', style: TextStyle(fontWeight: FontWeight.w600))),
-                    DataColumn(label: Text('Value', style: TextStyle(fontWeight: FontWeight.w600))),
+          : ListView(
+              children: [
+                // Header row: Key | Value, each half width
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'Key',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          'Value',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                    ),
                   ],
-                  rows: entries.map((e) {
-                    final value = e.value;
-                    final valueStr = value is List
-                        ? value.toString()
-                        : value.toString();
-                    final truncated = valueStr.length > 200
-                        ? '${valueStr.substring(0, 200)}…'
-                        : valueStr;
-                    return DataRow(
-                      cells: [
-                        DataCell(SelectableText(e.key)),
-                        DataCell(SelectableText(truncated)),
-                      ],
-                    );
-                  }).toList(),
                 ),
-              ),
+                const Divider(height: 1),
+                ...entries.asMap().entries.map((pair) {
+                  final index = pair.key;
+                  final e = pair.value;
+                  final valueStr = e.value is List
+                      ? e.value.toString()
+                      : e.value.toString();
+                  final row = Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: SelectableText(
+                            e.key,
+                            maxLines: null,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: SelectableText(
+                            valueStr,
+                            maxLines: null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                  return Container(
+                    color: index.isEven ? Colors.grey.shade200 : null,
+                    child: row,
+                  );
+                }),
+              ],
             ),
     );
   }
