@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -45,6 +46,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   int _currentDeviceIndex = 0;
   int _resolutionIndex = 0;
   String? _lastPhotoPath;
+  Uint8List? _lastPhotoBytes; // in-memory thumbnail after capture; null after restart
 
   @override
   void initState() {
@@ -309,6 +311,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       if (mounted) {
         setState(() {
           _lastPhotoPath = path;
+          _lastPhotoBytes = Uint8List.fromList(bytes);
           _showCaptureBlink = true;
         });
         Future.delayed(const Duration(milliseconds: 120), () {
@@ -564,6 +567,8 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   }
 
   Widget _buildGalleryButton() {
+    final hasThumbnail = _lastPhotoBytes != null ||
+        (_lastPhotoPath != null && File(_lastPhotoPath!).existsSync());
     return GestureDetector(
       onTap: _openGallery,
       child: SizedBox(
@@ -571,8 +576,10 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         height: 56,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: _lastPhotoPath != null && File(_lastPhotoPath!).existsSync()
-              ? Image.file(File(_lastPhotoPath!), fit: BoxFit.cover)
+          child: hasThumbnail
+              ? (_lastPhotoBytes != null
+                  ? Image.memory(_lastPhotoBytes!, fit: BoxFit.cover)
+                  : Image.file(File(_lastPhotoPath!), fit: BoxFit.cover))
               : Container(
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.white54),
