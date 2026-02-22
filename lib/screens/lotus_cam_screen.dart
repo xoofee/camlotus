@@ -298,8 +298,12 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        Center(
-          child: CameraPreview(_controller!),
+        InteractiveViewer(
+          minScale: 1.0,
+          maxScale: 10.0,
+          child: Center(
+            child: CameraPreview(_controller!),
+          ),
         ),
         if (_showKMatrix) _buildKMatrixOverlay(),
         Positioned(
