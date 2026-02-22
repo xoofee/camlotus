@@ -149,3 +149,14 @@ D/CameraUtils(12824):   CameraCharacteristics.Key(com.mediatek.flashfeature.cali
 D/CameraUtils(12824):   CameraCharacteristics.Key(com.mediatek.flashfeature.customization.available) = [1]
 D/CameraUtils(12824): ========== end CameraCharacteristics ==========
 ```
+
+
+# info screen
+1 add a top list, currently with these keys
+make physicalSize, availableFocalLengths, pixelArraySize, minimumFocusDistance
+make items in this list be on the top of the table
+
+2 rename lib\screens\camera_info_screen.dart and related class name it to appropriate name, if it only support android
+
+3 could the enum(s) of the value show the enum name? the 0, 1, 2, ..., is not readable for human (we have to query the api document when see the numbers)
+

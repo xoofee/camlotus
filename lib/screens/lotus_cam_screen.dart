@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../camera/k_matrix_estimator.dart';
-import 'camera_info_screen.dart';
+import 'android_camera_characteristics_screen.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -312,7 +312,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
       }
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (context) => CameraInfoScreen(characteristics: characteristics),
+          builder: (context) => AndroidCameraCharacteristicsScreen(characteristics: characteristics),
         ),
       );
     } catch (e) {
