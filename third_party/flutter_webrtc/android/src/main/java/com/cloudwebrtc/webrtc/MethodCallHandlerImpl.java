@@ -657,6 +657,11 @@ public class MethodCallHandlerImpl implements MethodCallHandler, StateProvider {
         cameraUtils.getCameraIntrinsics(trackId, result);
         break;
       }
+      case "mediaStreamTrackGetCameraCharacteristics": {
+        String trackId = call.argument("trackId");
+        cameraUtils.getCameraCharacteristicsMap(trackId, result);
+        break;
+      }
       case "mediaStreamTrackSetFocusMode": {
         cameraUtils.setFocusMode(call, result);
         break;

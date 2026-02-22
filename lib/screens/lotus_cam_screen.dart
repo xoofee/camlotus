@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+
+import '../camera/k_matrix_estimator.dart';
+import 'camera_info_screen.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -37,7 +40,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
   double _focusDiopters = 0.0;
   double _focusMaxDiopters = _kDefaultMaxDiopters;
   final TextEditingController _focusTextController = TextEditingController();
-  bool _showKMatrix = true;
+  bool _showKMatrix = false;
   bool _isCapturing = false;
   bool _showCaptureBlink = false;
   List<MediaDeviceInfo> _videoDevices = [];
@@ -68,7 +71,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     if (!mounted) return;
     setState(() {
       _focusDiopters = prefs.getDouble(_kFocusPrefKey) ?? 0.0;
-      _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? true;
+      _showKMatrix = prefs.getBool(_kShowKMatrixPrefKey) ?? false;
       _resolutionIndex = prefs.getInt(_kResolutionIndexKey) ?? 0;
       _resolutionIndex = _resolutionIndex.clamp(0, _kResolutions.length - 1);
       _lastPhotoPath = lastPath;
@@ -175,13 +178,15 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
       if (!mounted) return;
       double maxD = _focusMaxDiopters;
-      List<double>? kIntrinsics;
+      List<double>? kResolved;
       if (Platform.isAndroid && _localStream != null) {
         try {
           final track = _localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video');
           maxD = await Helper.getMaxFocusDistanceDiopters(track);
           if (maxD <= 0) maxD = _kDefaultMaxDiopters;
-          kIntrinsics = await Helper.getCameraIntrinsics(track);
+          final intrinsics = await Helper.getCameraIntrinsics(track);
+          final characteristics = await Helper.getCameraCharacteristics(track);
+          kResolved = resolveKMatrix(intrinsics, characteristics);
         } catch (_) {}
       }
       final maxDiopters = maxD;
@@ -191,7 +196,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         _focusMaxDiopters = maxDiopters;
         _focusDiopters = _focusDiopters.clamp(_kFocusMinDiopters, _focusMaxDiopters);
         _focusTextController.text = _formatDiopters(_focusDiopters);
-        _kMatrixIntrinsics = kIntrinsics;
+        _kMatrixIntrinsics = kResolved;
       });
       if (Platform.isAndroid && _localStream != null) {
         _applyFocusDistance(_focusDiopters);
@@ -225,8 +230,10 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
         Helper.getMaxFocusDistanceDiopters(track).then((double maxD) {
           if (maxD > 0 && mounted) setState(() => _focusMaxDiopters = maxD);
         });
-        Helper.getCameraIntrinsics(track).then((List<double>? k) {
-          if (mounted) setState(() => _kMatrixIntrinsics = k);
+        Helper.getCameraIntrinsics(track).then((List<double>? intrinsics) async {
+          final characteristics = await Helper.getCameraCharacteristics(track);
+          final kResolved = resolveKMatrix(intrinsics, characteristics);
+          if (mounted) setState(() => _kMatrixIntrinsics = kResolved);
         });
       }
     }
@@ -277,9 +284,44 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     _applyFocusDistance(diopters);
   }
 
-  void _toggleKMatrix() {
+  void _onKTap() {
+    if (_kMatrixIntrinsics == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('K matrix not available (no intrinsics or estimation failed)'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
     setState(() => _showKMatrix = !_showKMatrix);
     _saveShowKMatrix(_showKMatrix);
+  }
+
+  Future<void> _openCameraInfo() async {
+    if (_localStream == null) return;
+    try {
+      final track = _localStream!.getVideoTracks().firstWhere((t) => t.kind == 'video');
+      final characteristics = await Helper.getCameraCharacteristics(track);
+      if (!mounted) return;
+      if (characteristics == null || characteristics.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera info not available')),
+        );
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => CameraInfoScreen(characteristics: characteristics),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Camera info: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _captureAndSave() async {
@@ -333,28 +375,37 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        // title: const Text('LotusCam'),
         backgroundColor: Colors.black87,
         foregroundColor: Colors.white,
         actions: [
-          if (_kMatrixIntrinsics != null)
+          if (Platform.isAndroid && _isInitialized)
+            IconButton(
+              icon: const Icon(Icons.info_outline_rounded),
+              onPressed: _openCameraInfo,
+              tooltip: 'Camera info',
+            ),
+          if (Platform.isAndroid && _isInitialized)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Center(
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _toggleKMatrix,
+                    onTap: _onKTap,
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: _showKMatrix ? Colors.white24 : Colors.white.withValues(alpha: 0.1),
+                        color: _showKMatrix ? Colors.blue : Colors.white.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        'K ${_showKMatrix ? 'ON' : 'OFF'}',
-                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        'K',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _showKMatrix ? Colors.white : Colors.white70,
+                        ),
                       ),
                     ),
                   ),
@@ -451,7 +502,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
 
   Widget _buildKMatrixOverlay() {
     final k = _kMatrixIntrinsics!;
-    final fx = k.length > 0 ? k[0] : 0.0;
+    final fx = k.isNotEmpty ? k[0] : 0.0;
     final fy = k.length > 1 ? k[1] : 0.0;
     final cx = k.length > 2 ? k[2] : 0.0;
     final cy = k.length > 3 ? k[3] : 0.0;
@@ -541,7 +592,7 @@ class _LotusCamScreenState extends State<LotusCamScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        SizedBox(width: 24),
+        const SizedBox(width: 24),
         _buildGalleryButton(),
         const SizedBox(width: 24),
         _buildCaptureButton(),

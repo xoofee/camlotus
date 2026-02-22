@@ -31,7 +31,9 @@ import org.webrtc.CameraEnumerationAndroid;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import io.flutter.embedding.engine.systemchannels.PlatformChannel;
 import io.flutter.plugin.common.MethodCall;
@@ -581,7 +583,7 @@ public class CameraUtils {
 
       try {
         CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
-        printCameraCharacteristics(cameraDevice.getId(), characteristics);
+        // printCameraCharacteristics(cameraDevice.getId(), characteristics);
 
         float[] intrinsics = characteristics.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION);
         if (intrinsics == null || intrinsics.length < 4) {
@@ -600,6 +602,94 @@ public class CameraUtils {
     }
 
     result.success(null);
+  }
+
+  /**
+   * Returns all camera characteristics as a map (key name -> value) for Dart.
+   * Value types: String, Double, Integer, Boolean, List<Double>, List<Integer>.
+   */
+  @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+  public void getCameraCharacteristicsMap(String trackId, MethodChannel.Result result) {
+    VideoCapturerInfo info = getUserMediaImpl.getCapturerInfo(trackId);
+    if (info == null) {
+      result.success(null);
+      return;
+    }
+
+    if (info.capturer instanceof Camera2Capturer) {
+      CameraManager manager;
+      CameraDevice cameraDevice;
+
+      try {
+        Object session =
+                getPrivateProperty(
+                        Camera2Capturer.class.getSuperclass(), info.capturer, "currentSession");
+        manager =
+                (CameraManager)
+                        getPrivateProperty(Camera2Capturer.class, info.capturer, "cameraManager");
+        cameraDevice =
+                (CameraDevice) getPrivateProperty(session.getClass(), session, "cameraDevice");
+      } catch (NoSuchFieldWithNameException e) {
+        result.success(null);
+        return;
+      }
+
+      try {
+        CameraCharacteristics c = manager.getCameraCharacteristics(cameraDevice.getId());
+        Map<String, Object> map = new HashMap<>();
+        for (CameraCharacteristics.Key<?> key : c.getKeys()) {
+          String keyName = keyToString(key);
+          Object value = c.get(key);
+          Object serialized = characteristicValueToObject(value);
+          map.put(keyName, serialized);
+        }
+        result.success(map);
+      } catch (CameraAccessException e) {
+        result.success(null);
+      }
+      return;
+    }
+
+    result.success(null);
+  }
+
+  /** Extract readable key name from Key.toString() e.g. "android.lens.facing". */
+  private static String keyToString(CameraCharacteristics.Key<?> key) {
+    String s = key.toString();
+    int start = s.indexOf('(');
+    int end = s.lastIndexOf(')');
+    if (start >= 0 && end > start) {
+      return s.substring(start + 1, end);
+    }
+    return s;
+  }
+
+  /** Serialize characteristic value for method channel (Dart). */
+  private static Object characteristicValueToObject(Object value) {
+    if (value == null) return "null";
+    if (value instanceof Float) return ((Float) value).doubleValue();
+    if (value instanceof Double) return value;
+    if (value instanceof Integer) return value;
+    if (value instanceof Long) return ((Long) value).doubleValue();
+    if (value instanceof Boolean) return value;
+    if (value instanceof float[]) {
+      List<Double> list = new ArrayList<>();
+      for (float v : (float[]) value) list.add((double) v);
+      return list;
+    }
+    if (value instanceof int[]) {
+      List<Integer> list = new ArrayList<>();
+      for (int v : (int[]) value) list.add(v);
+      return list;
+    }
+    if (value instanceof long[]) {
+      List<Double> list = new ArrayList<>();
+      for (long v : (long[]) value) list.add((double) v);
+      return list;
+    }
+    String str = value.toString();
+    if (str.length() > 500) str = str.substring(0, 500) + "...";
+    return str;
   }
 
   /** Logs all camera characteristics to logcat (debug console). */

@@ -94,6 +94,11 @@ class Helper {
           MediaStreamTrack videoTrack) =>
       CameraUtils.getCameraIntrinsics(videoTrack);
 
+  /// All camera characteristics as map (Android). Null on other platforms.
+  static Future<Map<String, dynamic>?> getCameraCharacteristics(
+          MediaStreamTrack videoTrack) =>
+      CameraUtils.getCameraCharacteristics(videoTrack);
+
   static Future<void> setExposureMode(
           MediaStreamTrack videoTrack, CameraExposureMode exposureMode) =>
       CameraUtils.setExposureMode(videoTrack, exposureMode);

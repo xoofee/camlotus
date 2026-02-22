@@ -65,6 +65,21 @@ class CameraUtils {
     return null;
   }
 
+  /// Returns all camera characteristics as a map (Android).
+  /// Keys are e.g. "android.lens.facing", values are String, num, bool, or List.
+  static Future<Map<String, dynamic>?> getCameraCharacteristics(
+      MediaStreamTrack videoTrack) async {
+    if (WebRTC.platformIsAndroid) {
+      final result = await WebRTC.invokeMethod(
+        'mediaStreamTrackGetCameraCharacteristics',
+        <String, dynamic>{'trackId': videoTrack.id},
+      );
+      if (result == null) return null;
+      return Map<String, dynamic>.from(result as Map);
+    }
+    return null;
+  }
+
   /// Set the exposure point for the camera, focusMode can be:
   /// 'auto', 'locked'
   static Future<void> setFocusMode(
