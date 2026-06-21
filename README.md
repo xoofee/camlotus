@@ -1,109 +1,58 @@
-# Image Edge Extractor
+# Camlotus
 
-A Flutter application for extracting edges from images using various edge detection algorithms. Optimized for Windows.
+Camlotus is a Flutter reference app for camera and computer-vision experiments.
+The current code is centered on the `LotusCam` Android camera demo.
 
-note: the print is buggy in windows
+## Current Status
 
-![](./app.png)
+- `LotusCam` is the implemented feature.
+- MVG, VSLAM, VIO, and VINS demos are placeholders on the home screen.
+- Android is the actively exercised target.
+- Desktop and other Flutter targets are still scaffolded, but the camera feature depends on mobile camera behavior and a local `flutter_webrtc` patch.
 
-## Features
+## Implemented Features
 
-1. **Open Images**: Load JPG/PNG images from file system
-2. **Paste Images**: Paste images directly from clipboard
-3. **Edge Detection**: Apply edge detection algorithms:
-   - **Canny**: Advanced edge detection with adjustable thresholds
-   - **Sobel**: Gradient-based edge detection
-   - **Laplacian**: Second derivative edge detection
-4. **Parameter Adjustment**: Modify algorithm parameters in real-time:
-   - Low threshold (for Canny)
-   - High threshold (for Canny)
-   - Algorithm selection
-5. **Print Support**: Print processed edge-detected images
+- Live camera preview through `flutter_webrtc`.
+- Camera switching when multiple video inputs are available.
+- Resolution cycling across predefined camera sizes.
+- Manual focus-distance control in diopters on Android.
+- Camera intrinsic matrix display when Android camera metadata is available.
+- Android Camera2 characteristics inspection.
+- Still-frame capture to the app documents directory and the `Camlotus` gallery album.
+- Persistence for focus distance, resolution choice, and K-matrix overlay visibility.
+
+## Important Code Paths
+
+```text
+lib/main.dart
+lib/screens/home_page.dart
+lib/screens/lotus_cam_screen.dart
+lib/screens/android_camera_characteristics_screen.dart
+lib/camera/k_matrix_estimator.dart
+third_party/flutter_webrtc/
+```
 
 ## Requirements
 
-- Flutter SDK 3.5.4 or higher
-- Windows 10/11 (primary platform)
+- Flutter SDK compatible with Dart `^3.5.4`.
+- Android SDK and an attached Android device for the primary camera workflow.
+- Camera and photo/gallery permissions on the device.
 
-## Installation
+## Run On Android
 
-1. Clone the repository
-2. Install dependencies:
-```bash
+```sh
 flutter pub get
+flutter run -d <android-device-id>
 ```
 
-## Running the App
+For the Xiaomi device currently used in local smoke checks:
 
-```bash
-flutter run -d windows
+```sh
+flutter run -d dyzluokvron7hazl
 ```
 
-## Usage
+## Notes
 
-1. **Open an Image**:
-   - Click the "Open Image" button
-   - Select a JPG or PNG image file
-
-2. **Paste an Image**:
-   - Copy an image to your clipboard (Ctrl+C)
-   - Click the "Paste Image" button
-
-3. **Adjust Parameters**:
-   - Select an algorithm from the dropdown (Canny, Sobel, or Laplacian)
-   - Adjust the low and high threshold sliders (for Canny algorithm)
-   - The processed image updates automatically
-
-4. **Print**:
-   - After processing an image, click the print icon in the app bar
-   - Select your printer and print settings
-
-## Edge Detection Algorithms
-
-### Canny Edge Detection
-- Most advanced algorithm
-- Uses double thresholding and edge tracking
-- Parameters: Low threshold (0-255), High threshold (0-255)
-- Best for: General purpose edge detection
-
-### Sobel Edge Detection
-- Gradient-based detection
-- Faster than Canny
-- No parameters needed
-- Best for: Quick edge detection
-
-### Laplacian Edge Detection
-- Second derivative method
-- Detects zero crossings
-- No parameters needed
-- Best for: Fine detail detection
-
-## Technical Details
-
-- Built with Flutter
-- Uses `image` package for image processing
-- Uses `printing` package for print functionality
-- Uses `pasteboard` package for clipboard access
-- Uses `file_picker` for file selection
-
-## Project Structure
-
-```
-lib/
-  ├── main.dart                    # Main application entry point
-  ├── services/
-  │   └── edge_detection_service.dart  # Edge detection algorithms
-  └── widgets/
-      ├── image_viewer.dart        # Image display widget
-      └── parameter_controls.dart  # Parameter adjustment UI
-```
-
-## Development
-
-### Adding New Algorithms
-
-To add a new edge detection algorithm:
-
-1. Add the algorithm method to `EdgeDetectionService`
-2. Add the algorithm name to the dropdown in `ParameterControls`
-3. Update the `detectEdges` method to handle the new algorithm
+This is reference/prototype code under `references/`, not a production app.
+Treat the current behavior as an experimental camera capability sample rather
+than a finished VSLAM product.

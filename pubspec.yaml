@@ -1,5 +1,5 @@
 name: camlotus
-description: "A new Flutter project."
+description: "A Flutter reference app for Camlotus camera and vision experiments."
 publish_to: 'none'
 version: 0.1.0+25123001
 
