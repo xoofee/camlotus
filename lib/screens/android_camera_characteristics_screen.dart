@@ -158,7 +158,6 @@ class AndroidCameraCharacteristicsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ordered = _orderedEntries();
-    final topEntries = ordered.where((e) => _topKeys.contains(e.key)).toList();
 
     return Scaffold(
       appBar: AppBar(
